@@ -117,3 +117,33 @@ def test_beneficio_positivo_con_tassi_di_mercato_e_nullo_a_tasso_zero():
 def test_ricavi_in_calo_non_producono_versamenti_negativi():
     r = simula(PROF_GS, Scenario(anni=4, ricavi_annui_regime=40_000, crescita_annua=-0.4))
     assert all(pg.importo > 0 for pg in r.pagamenti)
+
+
+def test_caso_minimo_calcolato_a_mano():
+    """Un solo mese di incassi (dicembre 2027), un solo versamento (giugno 2028).
+
+    ricavi 1.000 -> reddito 780 -> INPS 26,07% = 203,35 -> imponibile 576,65 -> imposta 5% = 28,83
+    carico 232,18 versato a giugno 2028 (6 mesi dopo), prodotto libero al 2,5%:
+    lordi 232,18 x 2,5% x 6/12 = 2,90 ; imposta 26% = 0,75 ; bollo 0,20% x 232,18 x 6/12 = 0,23 ; netti 1,92
+    """
+    r = simula(
+        PROF_GS,
+        Scenario(anno_inizio=2027, mese_inizio=12, anni=1, ricavi_annui_regime=12_000,
+                 prodotti={0: 0.025}),
+    )
+    assert r.esiti[0].ricavi == pytest.approx(1_000)
+    assert r.esiti[0].carico_totale == pytest.approx(232.18, abs=0.01)
+    assert {pg.periodo for pg in r.pagamenti} == {"2028-06"}
+    assert sum(pg.importo for pg in r.pagamenti) == pytest.approx(232.18, abs=0.01)
+    assert r.kpi["interessi_lordi"] == pytest.approx(2.90, abs=0.01)
+    assert r.kpi["imposta_sugli_interessi"] == pytest.approx(0.75, abs=0.01)
+    assert r.kpi["bollo_deposito"] == pytest.approx(0.23, abs=0.01)
+    assert r.kpi["interessi_netti"] == pytest.approx(1.92, abs=0.01)
+
+
+def test_beneficio_coerente_con_formula_chiusa_su_prodotto_unico():
+    tasso = 0.04
+    r = simula(PROF_GS, Scenario(anni=3, ricavi_annui_regime=30_000, prodotti={0: tasso}))
+    mesi_euro = (r.allocazioni["importo"] * r.allocazioni["mesi_fermi"]).sum()
+    atteso = mesi_euro / 12 * (tasso * 0.74 - 0.002)
+    assert r.kpi["interessi_netti"] == pytest.approx(atteso, rel=1e-9)
