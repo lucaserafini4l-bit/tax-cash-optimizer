@@ -1,261 +1,419 @@
-"""Interfaccia Streamlit: avvio con `streamlit run app.py`."""
+"""Tasse partita IVA in cinque domande. Avvio con `streamlit run app.py`."""
 
 from __future__ import annotations
 
+import math
 import sys
-from dataclasses import replace
+from datetime import date
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
 import pandas as pd
 import streamlit as st
 
-from taxcash import PARAMETRI_2026 as P
-from taxcash import Profilo, Scenario, calcola_anno, confronta_regimi, simula
-from taxcash.deposito import rendimento_netto_annuo, tasso_pareggio
-from taxcash.params import COEFFICIENTI_FORFETTARIO
-from taxcash.simulazione import PRODOTTI_ESEMPIO
+from taxcash.ateco import (
+    ATTIVITA,
+    GRUPPI,
+    MOTIVO_CASSA,
+    Classificazione,
+    classifica,
+    classifica_attivita,
+    classifica_gruppo,
+    costi_impliciti,
+)
+from taxcash.consigliere import MESI_IT, Richiesta, consiglia, euro, soglia_dipendente
+from taxcash.simulazione import PRODOTTI_ESEMPIO, serie_ricavi_mensili
 
-st.set_page_config(page_title="Tax Cash Optimizer", page_icon="🧾", layout="wide")
+st.set_page_config(
+    page_title="Tasse partita IVA 2026: quanto accantonare e cosa fare con i soldi",
+    page_icon="🧾",
+    layout="centered",
+)
+
+GESTIONI = {
+    "separata": "Gestione Separata (professionisti senza cassa)",
+    "commercianti": "Commercianti (commercio, turismo, servizi)",
+    "artigiani": "Artigiani (attività manuali o di produzione)",
+}
+CRESCITE = {
+    "Resta stabile": 0.0,
+    "Cresce piano (+1% al mese)": 0.01,
+    "Cresce in fretta (+3% al mese)": 0.03,
+}
+VINCOLI = {
+    "Mi servono sempre disponibili": 0,
+    "Posso vincolarli fino a 6 mesi": 6,
+    "Posso vincolarli fino a 12 mesi": 12,
+    "Posso vincolarli fino a 24 mesi": 24,
+}
+SITUAZIONI = {"Solo la partita IVA": "unica", "Sono dipendente": "dipendente", "Sono pensionato": "pensionato"}
 
 
-def euro(x: float) -> str:
-    return f"{x:,.0f} €".replace(",", ".")
-
-
-def pct(x: float, dec: int = 1) -> str:
+def pct(x: float, dec: int = 0) -> str:
     return f"{x * 100:.{dec}f}%".replace(".", ",")
 
 
-st.title("Tax Cash Optimizer")
-st.caption(
-    "Calcolo di imposte e contributi per regime fiscale, scadenzario dei versamenti e rendimento "
-    "della liquidità accantonata su conto deposito. Parametri 2026. Strumento di simulazione: "
-    "non sostituisce un commercialista."
+def eur(x: float) -> str:
+    return f"{euro(x)} €"
+
+
+def n0(v: float) -> str:
+    return euro(v)
+
+
+def n1(v: float) -> str:
+    return f"{v:.1f}".replace(".", ",")
+
+
+st.title("Quante tasse pagherai con la partita IVA?")
+st.write(
+    "Rispondi a cinque domande. Ti diciamo **quale regime ti conviene**, **quanto mettere da parte ogni mese**, "
+    "**quando paghi** e **cosa fare con i soldi** mentre aspetti la scadenza."
 )
 
-# ------------------------------------------------------------------ Sidebar
-with st.sidebar:
-    st.header("1. Profilo fiscale")
-    regime = st.radio("Regime", ["forfettario", "ordinario"], format_func=str.capitalize, horizontal=True)
-    gestione = st.selectbox(
-        "Gestione INPS",
-        ["separata", "commercianti", "artigiani"],
-        format_func=lambda g: {"separata": "Gestione Separata (professionisti)",
-                               "commercianti": "Commercianti", "artigiani": "Artigiani"}[g],
+# ============================================================ 1. Attività
+st.subheader("1. Che attività svolgi?")
+modo = st.radio(
+    "Come vuoi indicarla",
+    ["Scegli dall'elenco", "Ho il codice ATECO", "Scegli il settore"],
+    horizontal=True,
+    label_visibility="collapsed",
+)
+cl: Classificazione | None = None
+if modo == "Scegli dall'elenco":
+    nomi = [a.nome for a in ATTIVITA]
+    scelto = st.selectbox(
+        "Attività", nomi, index=None, placeholder="Cerca la tua attività (es. sviluppatore, e-commerce, parrucchiere)"
     )
-    altra_copertura = st.checkbox("Già assicurato altrove / pensionato (aliquota GS 24%)",
-                                  disabled=gestione != "separata")
+    if scelto:
+        cl = classifica_attivita(ATTIVITA[nomi.index(scelto)])
+elif modo == "Ho il codice ATECO":
+    codice = st.text_input("Codice ATECO (bastano le prime 2-4 cifre)", placeholder="es. 62.01.00")
+    if codice.strip():
+        cl = classifica(codice)
+        if cl.serve == "ambulante":
+            r = st.radio(
+                "Vendi in forma ambulante (mercati, fiere)?",
+                ["No: negozio o online", "Sì: alimenti e bevande", "Sì: altri prodotti"],
+            )
+            cl = classifica(codice, {"No: negozio o online": "no", "Sì: alimenti e bevande": "alimentari"}.get(r, "altri"))
+        elif cl.serve == "intermediario":
+            r = st.radio(
+                "Fai da intermediario (agente, rappresentante, mediatore)?", ["Sì", "No: vendo all'ingrosso in proprio"]
+            )
+            cl = classifica(codice, "si" if r == "Sì" else "no")
+        elif cl.serve == "cassa":
+            r = st.radio(
+                "Sei iscritto a una cassa previdenziale privata (avvocati, commercialisti, ingegneri, medici...)?",
+                ["No", "Sì"],
+            )
+            cl = classifica(codice, "si" if r == "Sì" else "no")
+else:
+    chiavi = list(GRUPPI)
+    k = st.selectbox(
+        "Settore",
+        chiavi,
+        index=None,
+        format_func=lambda c: f"{GRUPPI[c].nome} (coefficiente {pct(GRUPPI[c].coefficiente)})",
+        placeholder="Scegli il settore più vicino alla tua attività",
+    )
+    if k:
+        cl = classifica_gruppo(k)
+        if k == "professioni":
+            cassa = st.radio("Sei iscritto a una cassa previdenziale privata?", ["No", "Sì"], horizontal=True)
+            if cassa == "Sì":
+                cl = Classificazione(None, GRUPPI[k], fuori_ambito=MOTIVO_CASSA)
 
-    coefficiente, startup, riduzione35 = 0.78, True, False
-    costi_pct, altri_redditi, add_reg, add_com, isa = 0.0, 0.0, 0.015, 0.005, False
-    if regime == "forfettario":
-        gruppo = st.selectbox(
-            "Attività (coefficiente di redditività)", list(COEFFICIENTI_FORFETTARIO),
-            index=len(COEFFICIENTI_FORFETTARIO) - 2,
-        )
-        coefficiente = st.number_input(
-            "Coefficiente di redditività (%)", 0.0, 100.0, COEFFICIENTI_FORFETTARIO[gruppo] * 100, 1.0
-        ) / 100
-        startup = st.checkbox("Nuova attività: aliquota 5% per i primi 5 anni", value=True)
-        riduzione35 = st.checkbox("Riduzione contributiva INPS 35% (su domanda)",
-                                  disabled=gestione == "separata")
-    else:
-        costi_pct = st.slider("Costi deducibili (% dei ricavi)", 0, 90, 20) / 100
-        altri_redditi = st.number_input("Altri redditi imponibili IRPEF (euro/anno)", 0.0, 500_000.0, 0.0, 1_000.0)
-        add_reg = st.number_input("Addizionale regionale (%)", 0.0, 5.0, 1.5, 0.05) / 100
-        add_com = st.number_input("Addizionale comunale (%)", 0.0, 1.0, 0.5, 0.05) / 100
-        isa = st.checkbox("Soggetto a ISA (acconti 50% + 50%)")
+if cl is None:
+    st.info("Scegli la tua attività per continuare.")
+    st.stop()
+if cl.errore:
+    st.error(cl.errore)
+    st.stop()
+if cl.fuori_ambito:
+    st.warning(
+        f"**Questo caso non è coperto.** {cl.fuori_ambito} "
+        "Per le stime rivolgiti a un commercialista o alla tua cassa."
+    )
+    st.stop()
 
-    st.header("2. Scenario")
-    anno_inizio = st.number_input("Anno di inizio attività", 2026, 2040, 2027, 1)
-    mese_inizio = st.slider("Mese di inizio", 1, 12, 1)
-    anni = st.slider("Anni da simulare", 2, 8, 4)
-    ricavi = st.number_input("Fatturato annuo a regime (euro)", 1_000.0, 500_000.0, 30_000.0, 1_000.0)
-    crescita = st.slider("Crescita annua del fatturato (%)", -30, 50, 0) / 100
-    modo_acc = st.radio("Accantonamento mensile", ["Automatico (aliquota effettiva)", "Percentuale fissa"])
-    acc_pct = None
-    if modo_acc == "Percentuale fissa":
-        acc_pct = st.slider("% dell'incasso accantonata", 0, 60, 25) / 100
+coef = cl.coefficiente
+with st.container(border=True):
+    st.markdown(f"**Coefficiente di redditività: {pct(coef)}** · {cl.gruppo.nome}")
+    ordine = list(GESTIONI)
+    gestione = st.selectbox(
+        "Contributi INPS (dedotti dall'attività: correggi se diversi)",
+        ordine,
+        index=ordine.index(cl.gestione),
+        format_func=GESTIONI.get,
+        help=(
+            "Dipende dall'attività concreta: professionisti senza cassa → Gestione Separata; attività manuali o di "
+            "produzione → Artigiani; commercio, turismo e servizi → Commercianti."
+        ),
+    )
+    for nota in cl.note:
+        st.caption(nota)
+    st.caption(
+        "Il coefficiente lo fissa la legge in base all'attività (classificazione ATECO 2007 corrispondente, anche "
+        "se il tuo codice è ATECO 2025): non è una scelta. Controllalo nel cassetto fiscale o con un commercialista."
+    )
 
-    st.header("3. Conto deposito")
-    st.caption("Offerte di esempio (giugno-luglio 2026): sostituirle con quelle reali.")
+# ============================================================ 2. Inizio e durata
+st.subheader("2. Quando parti e per quanto tempo vuoi pianificare?")
+oggi = date.today()
+prossimo = date(oggi.year + (oggi.month == 12), oggi.month % 12 + 1, 1)
+c1, c2, c3 = st.columns(3)
+mese_nome = c1.selectbox("Mese di inizio", MESI_IT, index=prossimo.month - 1, format_func=str.capitalize)
+anni_opz = [oggi.year, oggi.year + 1, oggi.year + 2]
+anno_inizio = c2.selectbox("Anno", anni_opz, index=anni_opz.index(prossimo.year))
+anni = c3.slider("Anni da pianificare", 2, 5, 3)
+mese_inizio = MESI_IT.index(mese_nome) + 1
+nuova = st.radio(
+    "È una nuova attività?",
+    ["Sì, non ho avuto altre partite IVA negli ultimi 3 anni", "No, ho già o ho avuto una partita IVA"],
+    help=(
+        "Nel forfettario i primi 5 anni hanno aliquota 5% invece di 15%, ma solo per una vera nuova attività: nessuna "
+        "altra attività autonoma negli ultimi 3 anni e nessuna prosecuzione di un'attività precedente o di un lavoro "
+        "da dipendente svolto per lo stesso datore di lavoro."
+    ),
+).startswith("Sì")
+
+# ============================================================ 3. Fatturato
+st.subheader("3. Quanto pensi di fatturare?")
+c1, c2 = st.columns(2)
+iniziale = c1.number_input("Fatturato mensile previsto all'inizio (€)", 0.0, 200_000.0, 2_000.0, 100.0)
+crescita_nome = c2.radio("Come cresce nel tempo?", list(CRESCITE))
+crescita = CRESCITE[crescita_nome]
+
+# ============================================================ 4. Altri redditi
+st.subheader("4. Hai altri redditi?")
+situazione = SITUAZIONI[st.radio("Situazione", list(SITUAZIONI), horizontal=True, label_visibility="collapsed")]
+reddito_altro = 0.0
+if situazione != "unica":
+    reddito_altro = st.number_input(
+        "Reddito lordo annuo da lavoro dipendente o pensione (€)", 0.0, 500_000.0, 25_000.0, 1_000.0,
+        help=f"Oltre {euro(soglia_dipendente(int(anno_inizio)))} euro nell'anno precedente il forfettario non è accessibile.",
+    )
+
+# ============================================================ 5. Liquidità
+st.subheader("5. Per quanto tempo puoi lasciare i soldi fermi?")
+vincolo_nome = st.selectbox("Soldi messi da parte per le tasse", list(VINCOLI), index=2, label_visibility="collapsed")
+max_vincolo = VINCOLI[vincolo_nome]
+
+# ============================================================ Opzioni avanzate
+riduzione35 = False
+with st.expander("Opzioni avanzate (facoltative)"):
+    costi = st.slider(
+        "Costi reali stimati (% del fatturato)", 0, 90, int(round(costi_impliciti(coef) * 100)),
+        help=(
+            "Per il confronto con l'ordinario. Di partenza usiamo i costi che il forfettario riconosce in modo forfettario "
+            "(100% meno il coefficiente): modificali se sai di averne di più o di meno."
+        ),
+    ) / 100
+    tetto = st.number_input("Fatturato mensile massimo (€, 0 = nessun limite)", 0.0, 500_000.0, 0.0, 500.0)
+    g1, g2 = st.columns(2)
+    gest_forf = g1.number_input(
+        "Commercialista all'anno, forfettario (€)", 0.0, 20_000.0, 600.0, 50.0,
+        help="Ipotesi: da fonti commerciali 2026 il forfettario costa tra 400 e 1.100 euro l'anno.",
+    )
+    gest_ord = g2.number_input(
+        "Commercialista all'anno, ordinario (€)", 0.0, 20_000.0, 1_200.0, 50.0,
+        help="Ipotesi: da fonti commerciali 2026 il semplificato costa tra 950 e 2.800 euro l'anno.",
+    )
+    if gestione != "separata":
+        riduzione35 = st.checkbox("Ho chiesto la riduzione contributiva INPS del 35% (solo forfettario)")
+    cc1, cc2 = st.columns(2)
+    add_reg = cc1.number_input("Addizionale regionale (%)", 0.0, 5.0, 1.5, 0.05) / 100
+    add_com = cc2.number_input("Addizionale comunale (%)", 0.0, 1.0, 0.5, 0.05) / 100
+    st.caption("Offerte di conto deposito di esempio (giugno-luglio 2026): sostituiscile con quelle reali.")
     prodotti_df = st.data_editor(
         pd.DataFrame(
-            {"Mesi di vincolo (0 = libero)": list(PRODOTTI_ESEMPIO),
-             "Tasso lordo annuo (%)": [v * 100 for v in PRODOTTI_ESEMPIO.values()]}
+            {
+                "Mesi di vincolo (0 = libero)": list(PRODOTTI_ESEMPIO),
+                "Tasso lordo annuo (%)": [v * 100 for v in PRODOTTI_ESEMPIO.values()],
+            }
         ),
         num_rows="dynamic",
         hide_index=True,
         width="stretch",
     )
-    tasso_cc = st.number_input("Tasso lordo conto corrente (%)", 0.0, 5.0, 0.0, 0.05) / 100
+    tasso_cc = st.number_input("Tasso lordo del conto corrente (%)", 0.0, 5.0, 0.0, 0.05) / 100
 
 prodotti = {
-    int(r.iloc[0]): float(r.iloc[1]) / 100
-    for _, r in prodotti_df.dropna().iterrows()
-    if r.iloc[0] >= 0
-}
-if not prodotti:
-    prodotti = {0: 0.0}
+    int(r.iloc[0]): float(r.iloc[1]) / 100 for _, r in prodotti_df.dropna().iterrows() if r.iloc[0] >= 0
+} or {0: 0.0}
 
-profilo = Profilo(
-    regime=regime, gestione=gestione, coefficiente=coefficiente, costi_pct=costi_pct,
-    startup=startup, riduzione_inps_35=riduzione35, altra_copertura=altra_copertura,
-    altri_redditi=altri_redditi, addizionale_regionale=add_reg, addizionale_comunale=add_com, isa=isa,
-)
-scenario = Scenario(
-    anno_inizio=int(anno_inizio), mese_inizio=mese_inizio, anni=anni, ricavi_annui_regime=ricavi,
-    crescita_annua=crescita, accantonamento_pct=acc_pct, prodotti=prodotti, tasso_conto_corrente=tasso_cc,
-)
-ris = simula(profilo, scenario)
-k = ris.kpi
-
-for avviso in ris.avvisi:
-    st.warning(avviso)
-
-tab1, tab2, tab3, tab4, tab5 = st.tabs(
-    ["Riepilogo", "Scadenzario", "Liquidità e conto deposito", "Confronto regimi", "Note e limiti"]
+# ------------------------------------------------------------ anteprima fatturato
+mesi_tot = (13 - mese_inizio) + 12 * (anni - 1)
+serie = serie_ricavi_mensili(iniziale, crescita, mesi_tot, tetto or None)
+per_anno, pos = [], 0
+for k in range(anni):
+    n_mesi = (13 - mese_inizio) if k == 0 else 12
+    per_anno.append(sum(serie[pos : pos + n_mesi]))
+    pos += n_mesi
+if iniziale <= 0:
+    st.info("Inserisci un fatturato mensile maggiore di zero per vedere la risposta.")
+    st.stop()
+st.caption(
+    "Fatturato stimato: " + " · ".join(f"{int(anno_inizio) + k}: {eur(v)}" for k, v in enumerate(per_anno))
 )
 
-# ------------------------------------------------------------------ Riepilogo
-with tab1:
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Imposte + contributi (orizzonte)", euro(k["carico_totale"]))
-    c2.metric("Pressione effettiva", pct(k["pressione_effettiva"]))
-    c3.metric("Interessi netti sul conto deposito", euro(k["interessi_netti"]))
-    c4.metric("Interessi netti / carico totale", pct(k["beneficio_su_carico_totale"], 2))
+req = Richiesta(
+    coefficiente=coef,
+    gestione=gestione,
+    anno_inizio=int(anno_inizio),
+    mese_inizio=mese_inizio,
+    anni=anni,
+    ricavo_mensile_iniziale=iniziale,
+    crescita_mensile=crescita,
+    tetto_mensile=tetto or None,
+    nuova_attivita=nuova,
+    situazione=situazione,
+    reddito_altro=reddito_altro,
+    costi_pct=costi,
+    riduzione_inps_35=riduzione35,
+    addizionale_regionale=add_reg,
+    addizionale_comunale=add_com,
+    max_vincolo_mesi=max_vincolo,
+    prodotti=prodotti,
+    tasso_conto_corrente=tasso_cc,
+    costo_gestione_forfettario=gest_forf,
+    costo_gestione_ordinario=gest_ord,
+)
+c = consiglia(req)
+k_ = c.ris.kpi
+nome_regime = "forfettario" if c.regime == "forfettario" else "ordinario semplificato"
 
-    versato_primo = sum(pg.importo for pg in ris.pagamenti if pg.anno == scenario.anno_inizio)
-    versato_secondo = sum(pg.importo for pg in ris.pagamenti if pg.anno == scenario.anno_inizio + 1)
-    st.info(
-        f"**Primo anno:** versi {euro(versato_primo)} contro un carico di competenza di "
-        f"{euro(ris.esiti[0].carico_totale)}. Nel **secondo anno** versi {euro(versato_secondo)}: "
-        "saldo del primo anno, acconti del secondo e quota restante dei contributi. "
-        "La differenza resta in cassa e può essere tenuta su un conto deposito."
-    )
+# ============================================================ La risposta
+st.divider()
+st.header("La tua risposta")
 
-    righe = []
-    for e in ris.esiti:
-        righe.append({
-            "Anno attività": e.anno_attivita,
-            "Ricavi": e.ricavi,
-            "Reddito": e.reddito,
-            "Aliquota sost.": e.aliquota_forfettaria if regime == "forfettario" else None,
-            "Imposta": e.imposta,
-            "INPS fissi": e.inps_fissi,
-            "INPS variabili": e.inps_variabili,
-            "Carico totale": e.carico_totale,
-            "Pressione": e.pressione,
-            "Netto dopo carico": e.netto_dopo_carico,
-        })
-    df = pd.DataFrame(righe)
-    st.dataframe(
-        df.style.format({
-            "Ricavi": "{:,.0f}", "Reddito": "{:,.0f}", "Imposta": "{:,.0f}", "INPS fissi": "{:,.0f}",
-            "INPS variabili": "{:,.0f}", "Carico totale": "{:,.0f}", "Netto dopo carico": "{:,.0f}",
-            "Aliquota sost.": "{:.0%}", "Pressione": "{:.1%}",
-        }, na_rep="-"),
-        hide_index=True, width="stretch",
-    )
-
-# ------------------------------------------------------------------ Scadenzario
-with tab2:
-    pag = pd.DataFrame(
-        [{"Periodo": pg.periodo, "Voce": pg.voce, "Categoria": pg.categoria, "Importo": pg.importo}
-         for pg in ris.pagamenti]
-    )
-    if pag.empty:
-        st.write("Nessun versamento nell'orizzonte simulato.")
+with st.container(border=True):
+    st.markdown(f"### Ti conviene il regime {nome_regime}")
+    if not c.forfettario_disponibile:
+        st.write("Il regime forfettario non è disponibile nel tuo caso: la stima usa l'ordinario.")
     else:
-        mensile = pag.pivot_table(index="Periodo", columns="Categoria", values="Importo", aggfunc="sum").fillna(0)
-        st.bar_chart(mensile)
-        st.dataframe(pag.style.format({"Importo": "{:,.2f}"}), hide_index=True, width="stretch")
+        alt = "ordinario" if c.regime == "forfettario" else "forfettario"
+        if c.regime == "forfettario":
+            tot_reg, tot_alt = c.carico_forfettario + c.gestione_forfettario, c.carico_ordinario + c.gestione_ordinario
+        else:
+            tot_reg, tot_alt = c.carico_ordinario + c.gestione_ordinario, c.carico_forfettario + c.gestione_forfettario
+        st.write(
+            f"In {c.anni_confronto} anni spendi circa **{eur(c.risparmio)} in meno** rispetto al regime {alt}: "
+            f"{eur(tot_reg)} contro {eur(tot_alt)} fra imposte, contributi INPS e commercialista stimato."
+        )
+        if c.costi_pareggio is not None:
+            if math.isinf(c.costi_pareggio):
+                st.caption("Il forfettario conviene qualunque sia la quota di costi che sostieni.")
+            elif c.regime == "forfettario":
+                st.caption(
+                    f"Il forfettario costa meno finché i tuoi costi reali restano sotto il {pct(c.costi_pareggio)} del "
+                    f"fatturato (hai ipotizzato {pct(costi)})."
+                )
+            else:
+                st.caption(
+                    f"L'ordinario conviene perché i tuoi costi ({pct(costi)} del fatturato) superano il "
+                    f"{pct(c.costi_pareggio)} oltre il quale batte il forfettario."
+                )
+
+st.caption("Il confronto non considera l'IVA, che dipende da chi sono i tuoi clienti e da quanto acquisti.")
+for a in c.avvisi:
+    st.warning(a)
+
+# ---- Tre numeri
+minimo, massimo = min(c.accantonamento_pct), max(c.accantonamento_pct)
+quota = pct(minimo, 1) if massimo - minimo < 0.005 else f"{pct(minimo)}-{pct(massimo)}"
+riga0 = c.calendario.iloc[0] if not c.calendario.empty else None
+m1, m2, m3 = st.columns(3)
+m1.metric("Da mettere da parte", quota, help="Percentuale di ogni incasso da accantonare per imposte e contributi.")
+m1.caption(f"≈ {eur(c.accantonamento_mensile[0])} al mese nel primo anno, {eur(c.accantonamento_mensile[-1])} nell'ultimo")
+if riga0 is not None:
+    m2.metric("Primo versamento", riga0["quando"].capitalize())
+    m2.caption(f"{eur(riga0['importo'])}: {riga0['voci'].lower()}")
+m3.metric("Interessi netti stimati", eur(k_["interessi_netti"]))
+m3.caption(f"su conto deposito in {anni} anni, dopo imposta 26% e bollo")
+
+saldi = c.calendario[c.calendario["voci"].str.contains("Saldo")] if not c.calendario.empty else c.calendario
+if not saldi.empty:
+    s0 = saldi.iloc[0]
+    if "acconto" in s0["voci"]:
+        st.info(
+            f"**Il primo anno non paghi imposte, ma a {s0['quando']} arrivano {eur(s0['importo'])}**: il saldo del primo "
+            "anno e il primo acconto del secondo insieme. Se spendi tutto quello che incassi, quel giorno i soldi non ci sono."
+        )
+
+for sugg in c.suggerimenti:
+    st.success(sugg)
+
+# ---- Cosa fare con i soldi
+st.subheader("Cosa fare con i soldi mentre aspetti la scadenza")
+st.markdown(
+    f"- **Ogni volta che incassi, sposta subito il {quota} su un conto separato**: quei soldi non sono tuoi, sono dell'erario e dell'INPS.\n"
+    "- Quello che serve a breve tienilo su un conto deposito **libero**; quello che resterà fermo più a lungo puoi "
+    "**vincolarlo** fino alla data della scadenza che lo userà.\n"
+    f"- Gli interessi netti ({eur(k_['interessi_netti'])}) compensano solo lo {pct(k_['beneficio_su_carico_totale'], 1)} del carico fiscale: "
+    "a pesare davvero sono la scelta del regime e le agevolazioni, non il conto deposito."
+)
+if not c.destinazioni.empty:
+    d = c.destinazioni.copy()
+    d["Dove"] = d["dove"].map(
+        lambda x: "Conto deposito libero (sempre svincolabile)"
+        if x == "libero"
+        else x.replace("vincolato", "Deposito vincolato")
+    )
+    d = d.rename(columns={"importo": "Soldi (€)", "mesi_medi": "Tempo medio fermi (mesi)", "interessi_netti": "Interessi netti (€)"})
+    st.dataframe(
+        d[["Dove", "Soldi (€)", "Tempo medio fermi (mesi)", "Interessi netti (€)"]].style.format(
+            {"Soldi (€)": n0, "Tempo medio fermi (mesi)": n1, "Interessi netti (€)": n0}
+        ),
+        hide_index=True,
+        width="stretch",
+    )
     st.caption(
-        "Le date indicate sono mensili (30 giugno e 30 novembre per saldo e acconti; maggio, agosto, novembre e "
-        "febbraio per le rate fisse INPS). Il calendario reale può slittare per weekend o proroghe."
+        "Ogni euro accantonato è abbinato alla scadenza che lo userà ed è collocato sul prodotto con il tasso più alto "
+        "il cui vincolo scade prima di quella data."
     )
 
-# ------------------------------------------------------------------ Liquidità
-with tab3:
-    st.subheader("Riserva accantonata")
-    tl = ris.timeline.set_index("periodo")
-    st.line_chart(tl[["riserva"]])
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Riserva massima", euro(k["riserva_massima"]))
-    c2.metric("Riserva media", euro(k["riserva_media"]))
-    c3.metric("Interessi netti (dopo 26% e bollo)", euro(k["interessi_netti"]))
-    c4.metric("Vantaggio vs conto corrente", euro(k["beneficio_vs_conto_corrente"]))
-
-    st.markdown(
-        f"- Interessi lordi: **{euro(k['interessi_lordi'])}**, imposta sostitutiva 26%: **{euro(k['imposta_sugli_interessi'])}**, "
-        f"bollo 0,20%: **{euro(k['bollo_deposito'])}**.\n"
-        f"- Rendimento netto medio annuo sulla riserva: **{pct(k['rendimento_netto_medio_annuo'], 2)}**.\n"
-        f"- Tasso lordo di pareggio (sotto il quale il deposito non conviene): **{pct(tasso_pareggio(tasso_cc), 2)}**.\n"
-        f"- Esempio: un deposito al 4% lordo rende **{pct(rendimento_netto_annuo(0.04), 2)}** netto annuo."
+# ---- Calendario
+st.subheader("Quando paghi")
+if c.calendario.empty:
+    st.write("Nessun versamento nell'orizzonte simulato.")
+else:
+    cal = c.calendario[["quando", "importo", "voci"]].rename(
+        columns={"quando": "Quando", "importo": "Quanto (€)", "voci": "Cosa"}
     )
+    cal["Quando"] = cal["Quando"].str.capitalize()
+    st.dataframe(cal.style.format({"Quanto (€)": n0}), hide_index=True, width="stretch")
     st.caption(
-        "Gli interessi non riducono l'imposta dovuta: la compensano in parte. Ogni versamento accantonato viene "
-        "abbinato alla scadenza che lo userà (criterio FIFO) e collocato sul prodotto con il tasso più alto "
-        "il cui vincolo non supera il tempo disponibile."
-    )
-    with st.expander("Dettaglio degli abbinamenti"):
-        if not ris.allocazioni.empty:
-            st.dataframe(
-                ris.allocazioni.style.format({
-                    "importo": "{:,.2f}", "tasso_lordo": "{:.2%}", "interessi_lordi": "{:,.2f}",
-                    "imposta_26": "{:,.2f}", "bollo": "{:,.2f}", "interessi_netti": "{:,.2f}",
-                    "beneficio_vs_conto_corrente": "{:,.2f}",
-                }),
-                hide_index=True, width="stretch",
-            )
-    with st.expander("Timeline mensile"):
-        st.dataframe(ris.timeline.style.format({c: "{:,.0f}" for c in ris.timeline.columns[1:]}),
-                     hide_index=True, width="stretch")
-
-# ------------------------------------------------------------------ Confronto regimi
-with tab4:
-    st.subheader("Forfettario o ordinario? Stesso fatturato, anno 1 a 12 mesi")
-    costi_confronto = st.slider("Costi reali per il regime ordinario (% dei ricavi)", 0, 90,
-                                int(costi_pct * 100) if regime == "ordinario" else 20) / 100
-    base = replace(profilo, costi_pct=costi_confronto)
-    livelli = list(range(10_000, 100_001, 10_000))
-    tabella = []
-    for r_ in livelli:
-        esiti = confronta_regimi(r_, base, costi_pct_ordinario=costi_confronto)
-        tabella.append({
-            "Ricavi": r_,
-            "Forfettario: carico": esiti["forfettario"].carico_totale,
-            "Ordinario: carico": esiti["ordinario"].carico_totale,
-            "Forfettario: netto": esiti["forfettario"].netto_dopo_carico,
-            "Ordinario: netto": esiti["ordinario"].netto_dopo_carico,
-        })
-    conf = pd.DataFrame(tabella)
-    st.line_chart(conf.set_index("Ricavi")[["Forfettario: carico", "Ordinario: carico"]])
-    st.dataframe(conf.style.format("{:,.0f}"), hide_index=True, width="stretch")
-    st.caption(
-        "Il forfettario richiede ricavi sotto 85.000 euro (uscita immediata sopra 100.000) e l'assenza di cause "
-        "di esclusione. Sopra tali soglie la colonna forfettario è solo indicativa."
+        "Date mensili indicative (30 giugno e 30 novembre per saldo e acconti; maggio, agosto, novembre e febbraio per le "
+        "rate fisse INPS di artigiani e commercianti): il calendario reale può slittare per weekend o proroghe."
     )
 
-# ------------------------------------------------------------------ Note
-with tab5:
-    st.markdown(
-        """
-**Cosa modella**
-- Imposta sostitutiva (5% o 15%) con coefficiente di redditività, oppure IRPEF 2026 (23/33/43%) con detrazione da lavoro autonomo e addizionali.
-- Contributi INPS: Gestione Separata, Artigiani, Commercianti (minimale, rate fisse, quota variabile, riduzione 35% per forfettari).
-- Saldo e acconti con metodo storico; nel primo anno nessun acconto.
-- Rendimento dei soldi accantonati su conto deposito, al netto del 26% sugli interessi e del bollo 0,20%.
+# ---- Anno per anno
+with st.expander("Vedi i numeri anno per anno"):
+    righe = []
+    for i, e in enumerate(c.ris.esiti):
+        riga = {
+            "Anno": int(anno_inizio) + i,
+            "Fatturato": e.ricavi,
+            "Imposte": e.imposta,
+            "Contributi INPS": e.inps_totale,
+            "Totale": e.carico_totale,
+            "% sul fatturato": e.pressione * 100,
+        }
+        if c.ris_alternativa is not None:
+            riga["Totale altro regime"] = c.ris_alternativa.esiti[i].carico_totale
+        righe.append(riga)
+    tab = pd.DataFrame(righe)
+    formati = {col: n0 for col in ("Fatturato", "Imposte", "Contributi INPS", "Totale", "Totale altro regime") if col in tab}
+    formati["% sul fatturato"] = n1
+    st.dataframe(tab.style.format(formati), hide_index=True, width="stretch")
 
-**Semplificazioni**
-- Parametri 2026 applicati a tutti gli anni; contributi dedotti per competenza e non per cassa.
-- Nessun massimale INPS, nessuna aliquota aggiuntiva oltre la prima fascia, nessuna IRAP.
-- Addizionali regionale e comunale inserite come valori medi: personalizzarle.
-- Interesse semplice sul periodo di permanenza; vincolo dimensionato sulla scadenza del versamento.
-- Bollo del conto corrente (34,20 euro) uguale nei due scenari, quindi escluso dal confronto.
-
-Dettagli e fonti in `docs/PARAMETRI.md` e `docs/METODO.md`.
-        """
-    )
+st.divider()
+st.page_link("pages/Modalita_avanzata.py", label="Apri la modalità avanzata (tutte le impostazioni)")
+st.caption(
+    "Simulazione a scopo informativo su parametri 2026 applicati a tutti gli anni; non è consulenza fiscale: verifica i "
+    "risultati con un commercialista. Non modella IRAP, casse professionali private né tutte le cause di esclusione dal "
+    "forfettario. Codice e fonti: github.com/lucaserafini4l-bit/tax-cash-optimizer"
+)

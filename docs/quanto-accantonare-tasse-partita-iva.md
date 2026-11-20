@@ -13,7 +13,7 @@ Carico totale (imposta più contributi INPS) in percentuale dei ricavi:
 
 | Profilo | 20.000 euro | 30.000 euro | 50.000 euro | 70.000 euro |
 |---|---:|---:|---:|---:|
-| Consulente, forfettario 78%, Gestione Separata, aliquota 5% | 23,2% | 23,2% | 23,2% | 23,2% |
+| Consulente aziendale 70.22, forfettario 78%, Gestione Separata, aliquota 5% | 23,2% | 23,2% | 23,2% | 23,2% |
 | Stesso consulente dopo i 5 anni, aliquota 15% | 29,0% | 29,0% | 29,0% | 29,0% |
 | E-commerce, forfettario 40%, commerciante, aliquota 5% | 23,9% | 16,6% | 11,3% | 11,3% |
 

@@ -2,7 +2,7 @@
 
 from .params import PARAMETRI_2026, Parametri
 from .tasse import Profilo, EsitoAnno, calcola_anno, confronta_regimi
-from .simulazione import Scenario, Risultato, simula
+from .simulazione import Scenario, Risultato, serie_ricavi_mensili, simula
 
 __all__ = [
     "PARAMETRI_2026",
@@ -14,4 +14,5 @@ __all__ = [
     "Scenario",
     "Risultato",
     "simula",
+    "serie_ricavi_mensili",
 ]

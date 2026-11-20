@@ -11,7 +11,7 @@ Valori in euro. Il vantaggio è l'interesse netto (dopo 26% e bollo 0,20%) rispe
 
 | Scenario | Fatturato annuo | Carico 4 anni | Pressione | Versato nel 1° anno | Riserva a fine 1° anno | Interessi netti | Interessi / carico |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| Consulente (forfettario 78%, Gestione Separata, 5%) | 30.000 | 27.861 | 23,2% | 0 | 6.965 | 262 | 0,94% |
+| Consulente aziendale 70.22 (forfettario 78%, Gestione Separata, 5%) | 30.000 | 27.861 | 23,2% | 0 | 6.965 | 262 | 0,94% |
 | E-commerce (forfettario 40%, commerciante, 5%) | 30.000 | 19.924 | 16,6% | 3.459 | 1.522 | 85 | 0,43% |
 | E-commerce (forfettario 40%, commerciante, 5%, riduzione INPS 35%) | 30.000 | 13.801 | 11,5% | 2.250 | 1.200 | 60 | 0,44% |
 | E-commerce (forfettario 40%, commerciante, 5%) | 70.000 | 31.675 | 11,3% | 3.459 | 4.460 | 173 | 0,55% |

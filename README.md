@@ -4,7 +4,7 @@
 ![licenza MIT](https://img.shields.io/badge/licenza-MIT-green)
 ![anno fiscale](https://img.shields.io/badge/parametri-2026-blue)
 
-Strumento gratuito e open source per chi sta **aprendo la partita IVA** (o l'ha appena aperta) e vuole rispondere a tre domande prima che arrivi la prima scadenza:
+Strumento gratuito e open source per chi sta **aprendo la partita IVA** (o l'ha appena aperta) e vuole rispondere a tre domande prima che arrivi la prima scadenza. Bastano **cinque risposte**: attività (o codice ATECO), quando inizi, per quanti anni, fatturato mensile previsto e la tua situazione. Il resto lo calcola l'app.
 
 1. **Quanto devo mettere da parte** ogni mese per tasse e contributi INPS?
 2. **Forfettario o ordinario**: quale regime mi costa meno?
@@ -14,11 +14,25 @@ In più simula quanto rende la liquidità accantonata se la tieni su un **conto 
 
 > Strumento di simulazione a scopo informativo, non consulenza fiscale. Parametri 2026: controlla sempre i risultati con un commercialista.
 
+## Come funziona (modalità semplice)
+
+| Domanda | Esempio | A cosa serve |
+|---|---|---|
+| Che attività fai? | «Sviluppatore software» oppure ATECO 62.01 | coefficiente di redditività e gestione INPS |
+| Quando inizi e per quanti anni? | gennaio 2027, 3 anni | scadenze e orizzonte del confronto |
+| Quanto pensi di fatturare? | 3.000 euro al mese, crescita 2% al mese | tasse, soglia 85.000 euro, accantonamento |
+| Sei anche dipendente o pensionato? | no / sì, 20.000 euro lordi | accesso al forfettario e aliquota INPS |
+| Quanto tempo puoi vincolare i soldi? | fino a 12 mesi | conto deposito adatto alle scadenze |
+
+Risposta: regime consigliato con il confronto in euro (commercialista incluso), **percentuale di ogni incasso da mettere da parte**, il mese del primo versamento, dove tenere la liquidità fino alle scadenze e gli interessi netti stimati. La modalità avanzata (pagina «Modalità avanzata») permette di impostare ogni parametro a mano.
+
+**Limiti dell'attività:** il codice ATECO determina il coefficiente di redditività, ma la gestione INPS dipende dall'attività effettivamente svolta, quindi è dedotta e va verificata. Le professioni con **cassa previdenziale propria** (avvocati, commercialisti, ingegneri e architetti, medici, geometri ecc.) e agricoltura sono **fuori ambito**: l'app lo segnala e non calcola. Codici ATECO 2025: finché non è completo il passaggio, si usa la classificazione 2007 della stessa attività.
+
 ## Perché ti serve
 
 Chi apre la partita IVA si trova davanti sempre lo stesso problema: **nel primo anno sembra che non si paghi nulla**, poi arriva una scadenza che pesa molto più di quanto si pensasse.
 
-Esempio dal modello, consulente in regime forfettario con 30.000 euro di ricavi l'anno (coefficiente 78%, Gestione Separata, aliquota 5%):
+Esempio dal modello, consulente aziendale (ATECO 70.22) in regime forfettario con 30.000 euro di ricavi l'anno (coefficiente 78%, Gestione Separata, aliquota 5%):
 
 | Quando | Cosa si versa | Importo |
 |---|---|---:|
@@ -86,7 +100,7 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Si apre il browser con l'app: scegli regime, gestione INPS, attività e fatturato nella barra laterale; leggi il risultato in cinque schede (riepilogo, scadenzario, liquidità e conto deposito, confronto regimi, note e limiti).
+Si apre il browser con la modalità semplice. Dal link in fondo alla pagina si passa alla modalità avanzata: regime, gestione INPS, attività e fatturato nella barra laterale, risultato in cinque schede (riepilogo, scadenzario, liquidità e conto deposito, confronto regimi, note e limiti).
 
 ### Come libreria Python
 
@@ -121,14 +135,17 @@ for pg in r.pagamenti[:5]:    # scadenzario
 ## Struttura del progetto
 
 ```
-app.py                     interfaccia Streamlit
+app.py                     modalità semplice (5 domande, consiglio completo)
+pages/Modalita_avanzata.py modalità avanzata (tutti i parametri)
+src/taxcash/ateco.py       codice ATECO -> coefficiente e gestione INPS
+src/taxcash/consigliere.py regime consigliato, accantonamento, calendario, liquidità
 src/taxcash/params.py      parametri 2026 e coefficienti (modificabili)
 src/taxcash/tasse.py       IRPEF, forfettario, ordinario, confronto regimi
 src/taxcash/inps.py        contributi INPS
 src/taxcash/scadenzario.py saldo, acconti, rate fisse
 src/taxcash/deposito.py    interessi netti, tasso di pareggio, scelta del prodotto
 src/taxcash/simulazione.py simulazione mensile e KPI
-tests/                     34 test con valori calcolati a mano
+tests/                     117 test, con valori calcolati a mano e test dell'interfaccia
 docs/                      guide, parametri e fonti, metodo, esempi
 ```
 
@@ -138,7 +155,9 @@ Test: `python -m pytest -q`.
 
 - Parametri 2026 applicati a tutti gli anni; contributi dedotti per competenza e non per cassa.
 - Addizionali regionale e comunale come valori illustrativi (1,5% e 0,5%): da personalizzare.
-- Non modellati: massimale INPS, aliquota aggiuntiva oltre la prima fascia, IRAP, IVA, cause di esclusione dal forfettario.
+- Non modellati: massimale INPS, aliquota aggiuntiva oltre la prima fascia, IRAP, IVA, la maggior parte delle cause di esclusione dal forfettario (sono considerate soglie di ricavi e reddito da lavoro dipendente).
+- Il confronto tra regimi include un costo stimato del commercialista (default 600 euro l'anno forfettario, 1.200 ordinario, modificabili): senza, a redditi bassi l'ordinario sembrerebbe leggermente più economico perché la detrazione da lavoro autonomo azzera l'IRPEF.
+- Crescita del fatturato: se supera 85.000 euro l'app limita il confronto agli anni in cui il forfettario è applicabile; i numeri successivi sono indicativi.
 - Due soglie sugli acconti (51,65 euro e acconto INPS 80%) non sono state riverificate: vedi [parametri e fonti](docs/PARAMETRI.md).
 - Offerte di conto deposito di esempio (giugno-luglio 2026): sostituirle con quelle reali.
 

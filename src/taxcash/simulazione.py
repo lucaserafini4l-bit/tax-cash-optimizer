@@ -26,10 +26,29 @@ class Scenario:
     accantonamento_pct: float | None = None    # None = aliquota effettiva calcolata dal modello
     prodotti: dict[int, float] = field(default_factory=lambda: dict(PRODOTTI_ESEMPIO))
     tasso_conto_corrente: float = 0.0
+    # Se valorizzato, sostituisce ricavi_annui_regime e crescita_annua: fatturato di ogni mese di attività,
+    # dal primo mese in poi (lunghezza = somma dei mesi attivi di tutti gli anni simulati).
+    ricavi_mensili: list[float] | None = None
 
     def mesi_attivi(self, k: int) -> int:
         """Mesi di attività nell'anno k (0 = primo anno)."""
         return 13 - self.mese_inizio if k == 0 else 12
+
+
+def serie_ricavi_mensili(
+    iniziale: float,
+    crescita_mensile: float,
+    mesi: int,
+    tetto_mensile: float | None = None,
+) -> list[float]:
+    """Fatturato mensile con crescita composta; `tetto_mensile` ferma la crescita a un massimo."""
+    serie = []
+    for j in range(mesi):
+        valore = max(0.0, iniziale * (1.0 + crescita_mensile) ** j)
+        if tetto_mensile is not None:
+            valore = min(valore, tetto_mensile)
+        serie.append(valore)
+    return serie
 
 
 @dataclass
@@ -78,10 +97,22 @@ def simula(
 
     # --- 1. Imposte e contributi per anno ---
     mesi = [scenario.mesi_attivi(k) for k in range(n)]
-    ricavi = [
-        scenario.ricavi_annui_regime * (1 + scenario.crescita_annua) ** k * mesi[k] / 12.0
-        for k in range(n)
-    ]
+    if scenario.ricavi_mensili is None:
+        ricavi = [
+            scenario.ricavi_annui_regime * (1 + scenario.crescita_annua) ** k * mesi[k] / 12.0
+            for k in range(n)
+        ]
+        mensili_per_anno = [[ricavi[k] / mesi[k]] * mesi[k] if mesi[k] else [] for k in range(n)]
+    else:
+        if len(scenario.ricavi_mensili) != sum(mesi):
+            raise ValueError(
+                f"ricavi_mensili deve avere {sum(mesi)} valori (mesi di attività), non {len(scenario.ricavi_mensili)}"
+            )
+        mensili_per_anno, pos = [], 0
+        for k in range(n):
+            mensili_per_anno.append(list(scenario.ricavi_mensili[pos : pos + mesi[k]]))
+            pos += mesi[k]
+        ricavi = [sum(m) for m in mensili_per_anno]
     esiti = [calcola_anno(profilo, ricavi[k], k + 1, mesi[k], p) for k in range(n)]
     for e in esiti:
         for nota in e.note:
@@ -97,14 +128,13 @@ def simula(
     accantonato = [0.0] * durata
     for k in range(n):
         primo = k * 12 + (scenario.mese_inizio - 1 if k == 0 else 0)
-        mensile = ricavi[k] / mesi[k] if mesi[k] else 0.0
         if scenario.accantonamento_pct is None:
             quota = esiti[k].pressione
         else:
             quota = scenario.accantonamento_pct
-        for t in range(primo, primo + mesi[k]):
-            incasso[t] = mensile
-            accantonato[t] = mensile * quota
+        for j, t in enumerate(range(primo, primo + mesi[k])):
+            incasso[t] = mensili_per_anno[k][j]
+            accantonato[t] = mensili_per_anno[k][j] * quota
 
     # --- 4. Abbinamento versamenti <-> accantonamenti e interessi ---
     tranche = [[float(t), a] for t, a in enumerate(accantonato) if a > 1e-9]

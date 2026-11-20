@@ -76,7 +76,7 @@ COEFFICIENTI_FORFETTARIO: dict[str, float] = {
     "Servizi di alloggio e ristorazione (ATECO 55-56)": 0.40,
     "Commercio ambulante altri prodotti (ATECO 47.82-47.89)": 0.54,
     "Intermediari del commercio (ATECO 46.1)": 0.62,
-    "Altre attività economiche (artigiani, servizi alla persona, trasporti)": 0.67,
-    "Attività professionali, tecniche, sanitarie, finanziarie, informatiche": 0.78,
+    "Altre attività economiche (manifattura, trasporti, servizi alla persona, informatica e media: ATECO 58-63)": 0.67,
+    "Attività professionali, scientifiche, tecniche, sanitarie, di istruzione, finanziarie (ATECO 64-66, 69-75, 85-88)": 0.78,
     "Costruzioni e attività immobiliari (ATECO 41-43, 68)": 0.86,
 }
