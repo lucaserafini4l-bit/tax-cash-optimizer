@@ -4,6 +4,8 @@
 ![licenza MIT](https://img.shields.io/badge/licenza-MIT-green)
 ![anno fiscale](https://img.shields.io/badge/parametri-2026-blue)
 
+**[Provalo online, senza installare nulla: calcolatore-forfettario.streamlit.app](https://calcolatore-forfettario.streamlit.app/)**
+
 Strumento gratuito e open source per chi sta **aprendo la partita IVA** (o l'ha appena aperta) e vuole rispondere a tre domande prima che arrivi la prima scadenza. Bastano **cinque risposte**: attività (o codice ATECO), quando inizi, per quanti anni, fatturato mensile previsto e la tua situazione. Il resto lo calcola l'app.
 
 1. **Quanto devo mettere da parte** ogni mese per tasse e contributi INPS?
@@ -91,7 +93,7 @@ Sì: lo strumento stima e confronta, non presenta dichiarazioni e non verifica i
 
 ## Come si usa
 
-Serve Python 3.10 o superiore ([download](https://www.python.org/downloads/)).
+Più semplice: [apri l'app online](https://calcolatore-forfettario.streamlit.app/). Se preferisci eseguirla sul tuo computer serve Python 3.10 o superiore ([download](https://www.python.org/downloads/)).
 
 ```bash
 git clone https://github.com/lucaserafini4l-bit/tax-cash-optimizer.git

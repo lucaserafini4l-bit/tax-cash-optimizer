@@ -2,6 +2,8 @@
 title: Calcolatore tasse partita IVA 2026 - forfettario o ordinario, quanto accantonare
 description: Strumento gratuito per chi apre la partita IVA nel 2026. Confronta forfettario e ordinario, calcola imposte e contributi INPS, mostra le scadenze di saldo e acconti e quanto accantonare ogni mese.
 ---
+> **Calcolatore online gratuito:** [calcolatore-forfettario.streamlit.app](https://calcolatore-forfettario.streamlit.app/) - rispondi a cinque domande e scopri regime, quanto accantonare e quando paghi.
+
 
 # Calcolatore tasse partita IVA 2026
 
