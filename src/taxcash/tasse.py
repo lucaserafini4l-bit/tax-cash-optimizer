@@ -40,6 +40,7 @@ class EsitoAnno:
     aliquota_forfettaria: float  # 0 se ordinario
     imposta: float               # imposta sostitutiva oppure IRPEF netta + addizionali sull'attività
     note: tuple[str, ...] = field(default_factory=tuple)
+    costi_reali: float = 0.0     # costi effettivamente sostenuti (nel forfettario non deducibili)
 
     @property
     def inps_totale(self) -> float:
@@ -51,7 +52,7 @@ class EsitoAnno:
 
     @property
     def netto_dopo_carico(self) -> float:
-        return self.ricavi - self.costi - self.carico_totale
+        return self.ricavi - self.costi_reali - self.carico_totale
 
     @property
     def pressione(self) -> float:
@@ -130,6 +131,7 @@ def calcola_anno(
             aliquota_forfettaria=aliquota,
             imposta=imposta,
             note=tuple(note),
+            costi_reali=ricavi * profilo.costi_pct,
         )
 
     # --- Ordinario semplificato (cassa) ---
@@ -163,6 +165,7 @@ def calcola_anno(
         aliquota_forfettaria=0.0,
         imposta=irpef_attivita + addizionali,
         note=tuple(note),
+        costi_reali=costi,
     )
 
 
@@ -177,7 +180,7 @@ def confronta_regimi(
 ) -> dict[str, EsitoAnno]:
     """Stesso fatturato calcolato nei due regimi, per capire quale conviene."""
     costi = profilo.costi_pct if costi_pct_ordinario is None else costi_pct_ordinario
-    forf = replace(profilo, regime="forfettario")
+    forf = replace(profilo, regime="forfettario", costi_pct=costi)
     ordi = replace(profilo, regime="ordinario", costi_pct=costi)
     return {
         "forfettario": calcola_anno(forf, ricavi, anno_attivita, mesi_attivita, p),

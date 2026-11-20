@@ -1,3 +1,8 @@
+---
+title: Parametri fiscali 2026 e fonti - calcolatore tasse partita IVA
+description: Aliquote IRPEF 2026, coefficienti forfettario, contributi INPS, acconti e regole del conto deposito usati dal calcolatore, con le fonti consultate.
+---
+
 # Parametri e fonti (riferimento 2026)
 
 Tutti i valori sono in `src/taxcash/params.py` e si possono modificare. Fonti consultate il 19/11/2026.
@@ -23,7 +28,7 @@ Dove un valore non è stato riverificato è indicato esplicitamente.
 | Contributi fissi sul minimale | 4.521,36 (artigiani), 4.611,64 (commercianti) | https://www.soluzionetasse.com/contributi-artigiani-e-commercianti/ |
 | Contributo maternità 7,44 / anno | ricavato per differenza: 4.611,64 - 18.808 x 24,48% = 7,44 | calcolo |
 | Rate fisse | maggio, agosto, novembre, febbraio | https://www.quotidianopiu.it/dettaglio/14805771/artigiani-e-commercianti-aliquote-contributi-per-lanno-2026 |
-| Riduzione 35% per forfettari | su domanda INPS entro il 28 febbraio | https://www.informazionefiscale.it/riduzione-contributi-inps-forfettari-regime-agevolazioni |
+| Riduzione 35% per forfettari | su domanda all'INPS (verificare i termini sul sito INPS) | https://www.informazionefiscale.it/riduzione-contributi-inps-forfettari-regime-agevolazioni |
 
 Non modellati: massimale contributivo, aliquota aggiuntiva oltre la prima fascia di reddito, sconto del 50% per nuovi iscritti 2025 (L. 207/2024).
 La riduzione del 35% è applicata alla quota IVS e non al contributo maternità: ipotesi non riverificata.

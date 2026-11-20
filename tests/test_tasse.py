@@ -122,3 +122,15 @@ def test_confronto_regimi_forfettario_conviene_su_redditi_bassi():
     assert esiti["forfettario"].imposta < esiti["ordinario"].imposta
     assert esiti["forfettario"].regime == "forfettario"
     assert esiti["ordinario"].regime == "ordinario"
+
+
+def test_netto_confronto_sottrae_i_costi_reali_in_entrambi_i_regimi():
+    prof = Profilo(gestione="separata", coefficiente=0.78,
+                   addizionale_regionale=0.0, addizionale_comunale=0.0)
+    esiti = confronta_regimi(30_000, prof, costi_pct_ordinario=0.30)
+    for e in esiti.values():
+        assert e.costi_reali == pytest.approx(9_000)
+        assert e.netto_dopo_carico == pytest.approx(30_000 - 9_000 - e.carico_totale)
+    # il forfettario non deduce i costi: l'imposta non cambia al variare dei costi reali
+    assert (confronta_regimi(30_000, prof, costi_pct_ordinario=0.10)["forfettario"].imposta
+            == pytest.approx(esiti["forfettario"].imposta))

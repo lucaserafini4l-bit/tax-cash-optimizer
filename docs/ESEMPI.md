@@ -1,3 +1,8 @@
+---
+title: Esempi di simulazione partita IVA - forfettario e ordinario
+description: Scenari tipici di partita IVA a 4 anni: carico fiscale, versamenti del primo anno e interessi netti su conto deposito.
+---
+
 # Esempi di simulazione
 
 Generato da `scripts/genera_esempi.py`: 4 anni di attività dal gennaio 2027, fatturato costante,

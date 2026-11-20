@@ -1,0 +1,17 @@
+title: Calcolatore tasse partita IVA 2026
+description: Calcolatore gratuito e open source per la partita IVA 2026. Confronta forfettario e ordinario, calcola contributi INPS, saldo e acconti, quanto accantonare e il rendimento su conto deposito.
+lang: it
+url: https://lucaserafini4l-bit.github.io
+baseurl: /tax-cash-optimizer
+theme: jekyll-theme-minimal
+show_downloads: false
+plugins:
+  - jekyll-seo-tag
+  - jekyll-sitemap
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default
+exclude:
+  - README.md

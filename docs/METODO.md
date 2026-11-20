@@ -1,3 +1,8 @@
+---
+title: Metodo di calcolo - imposte, scadenze e conto deposito
+description: Come il calcolatore calcola imposta sostitutiva, IRPEF, contributi INPS, saldo e acconti e il rendimento della liquidità accantonata.
+---
+
 # Metodo di calcolo
 
 ## 1. Imposte e contributi di competenza (per anno)
